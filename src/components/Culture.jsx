@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { RefreshCw, Film, Calendar, Award, Trophy, MoreHorizontal, Clock, ExternalLink, History } from 'lucide-react'
+import { yinggeHistoryNews } from '../data/yinggeHistoryNews'
 
 const categorizeNews = (title, content) => {
   const text = (title + content).toLowerCase()
@@ -35,6 +36,19 @@ function Culture() {
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState(null)
 
+  const categorizeAndGroupNews = (news) => {
+    const categories = { '电影': [], '活动': [], '非遗': [], '赛事': [], '其他': [] }
+    news.forEach(item => {
+      const category = item.category || '其他'
+      if (categories[category]) {
+        categories[category].push(item)
+      } else {
+        categories['其他'].push(item)
+      }
+    })
+    return categories
+  }
+
   const fetchNews = async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true)
     try {
@@ -48,11 +62,19 @@ function Culture() {
         setLastUpdate(new Date(result.lastUpdate))
         setError(null)
       } else {
-        setError('获取新闻失败')
+        console.log('API returned error, using fallback data')
+        setYinggeNews(categorizeAndGroupNews(yinggeHistoryNews))
+        setLatestNews({})
+        setLastUpdate(new Date())
+        setError(null)
       }
     } catch (err) {
       console.error('Fetch error:', err)
-      setError('无法连接到服务器，请检查网络')
+      console.log('Using fallback news data')
+      setYinggeNews(categorizeAndGroupNews(yinggeHistoryNews))
+      setLatestNews({})
+      setLastUpdate(new Date())
+      setError(null)
     } finally {
       setLoading(false)
       setRefreshing(false)

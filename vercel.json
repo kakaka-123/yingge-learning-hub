@@ -1,0 +1,16 @@
+{
+  "version": 2,
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "framework": "vite",
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "https://yingge-api.up.railway.app/api/$1"
+    },
+    {
+      "source": "/dailyhot/(.*)",
+      "destination": "https://news-iota-liard-98.vercel.app/$1"
+    }
+  ]
+}

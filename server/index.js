@@ -4,6 +4,7 @@ import https from 'https'
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import OpenAI from 'openai'
 import { API_CONFIG } from './config/apiConfig.js'
 import { initialNews } from './data/initialNews.js'
 
@@ -258,18 +259,20 @@ const fetchHackerNews = () => {
               storyRes.on('data', (chunk) => { storyData += chunk })
               storyRes.on('end', () => {
                 try {
-                  const item = JSON.parse(storyData)
-                  if (item && item.title) {
+                  const story = JSON.parse(storyData)
+                  if (story.title && story.url) {
                     stories.push({
-                      title: item.title,
-                      link: item.url || `https://news.ycombinator.com/item?id=${id}`,
-                      pubDate: new Date(item.time * 1000).toISOString(),
-                      content: item.text || '',
-                      summary: item.title,
-                      category: categorizeNews(item.title, item.text || '')
+                      title: story.title,
+                      link: story.url,
+                      pubDate: story.time ? new Date(story.time * 1000).toISOString() : new Date().toISOString(),
+                      content: story.text || '',
+                      summary: story.title,
+                      category: '其他'
                     })
                   }
-                } catch (e) { }
+                } catch (e) {
+                  console.error('HackerNews story parse error:', e.message)
+                }
                 completed++
                 if (completed === topIds.length) {
                   console.log(`HackerNews found: ${stories.length}`)
@@ -277,61 +280,35 @@ const fetchHackerNews = () => {
                 }
               })
             })
-            storyReq.on('error', () => { completed++; if (completed === topIds.length) resolve([]) })
-            storyReq.setTimeout(3000, () => { storyReq.destroy(); completed++; if (completed === topIds.length) resolve([]) })
+            storyReq.on('error', () => {
+              completed++
+              if (completed === topIds.length) {
+                resolve(stories)
+              }
+            })
+            storyReq.setTimeout(5000, () => {
+              storyReq.destroy()
+              completed++
+              if (completed === topIds.length) {
+                resolve(stories)
+              }
+            })
             storyReq.end()
           })
         } catch (e) {
+          console.error('HackerNews parse error:', e.message)
           resolve([])
         }
       })
     })
-    req.on('error', reject)
-    req.setTimeout(10000, () => { req.destroy(); resolve([]) })
-    req.end()
-  })
-}
-
-const fetchDevDocs = () => {
-  return new Promise((resolve, reject) => {
-    const options = {
-      hostname: 'devdocs.io',
-      port: 443,
-      path: '/feed/news.xml',
-      method: 'GET'
-    }
-
-    const req = https.request(options, (res) => {
-      let data = ''
-      res.on('data', (chunk) => { data += chunk })
-      res.on('end', () => {
-        try {
-          const news = []
-          const items = data.match(/<item[^>]*>[\s\S]*?<\/item>/gi) || []
-          for (const item of items.slice(0, 20)) {
-            const titleMatch = item.match(/<title>([^<]*)<\/title>/i)
-            const linkMatch = item.match(/<link>([^<]*)<\/link>/i)
-            const descMatch = item.match(/<description>([^<]*)<\/description>/i)
-            if (titleMatch && linkMatch) {
-              news.push({
-                title: titleMatch[1],
-                link: linkMatch[1],
-                pubDate: new Date().toISOString(),
-                content: descMatch ? descMatch[1] : '',
-                summary: titleMatch[1],
-                category: '其他'
-              })
-            }
-          }
-          console.log(`DevDocs found: ${news.length}`)
-          resolve(news)
-        } catch (e) {
-          resolve([])
-        }
-      })
+    req.on('error', (e) => {
+      console.error('HackerNews request error:', e.message)
+      resolve([])
     })
-    req.on('error', reject)
-    req.setTimeout(10000, () => { req.destroy(); resolve([]) })
+    req.setTimeout(30000, () => {
+      req.destroy()
+      resolve([])
+    })
     req.end()
   })
 }
@@ -459,15 +436,114 @@ const fetchSinaNews = () => {
   })
 }
 
+const fetchSogouNews = () => {
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: 'news.sogou.com',
+      port: 443,
+      path: '/news?query=%E8%8B%B1%E6%AD%8C%E8%88%9E&mode=1',
+      method: 'GET',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'text/html'
+      }
+    }
+
+    const req = https.request(options, (res) => {
+      let data = ''
+      res.on('data', (chunk) => { data += chunk })
+      res.on('end', () => {
+        try {
+          const news = []
+          const items = data.match(/<h3[^>]*class="news-title[^"]*"[^>]*>[\s\S]*?<\/h3>/gi) || []
+          for (const item of items.slice(0, 15)) {
+            const titleMatch = item.match(/>([^<]*)</)
+            const linkMatch = item.match(/href="(https?:\/\/[^"]*?)"/i)
+            if (titleMatch && linkMatch) {
+              const title = titleMatch[1].replace(/<[^>]*>/g, '').trim()
+              if (title.includes('英歌舞') || title.includes('英歌')) {
+                news.push({
+                  title: title,
+                  link: linkMatch[1],
+                  pubDate: new Date().toISOString(),
+                  content: '',
+                  summary: title,
+                  category: categorizeNews(title, '')
+                })
+              }
+            }
+          }
+          console.log(`Sogou news found: ${news.length}`)
+          resolve(news)
+        } catch (e) {
+          console.error('Sogou parse error:', e.message)
+          resolve([])
+        }
+      })
+    })
+    req.on('error', (e) => {
+      console.error('Sogou request error:', e.message)
+      resolve([])
+    })
+    req.setTimeout(10000, () => { req.destroy(); resolve([]) })
+    req.end()
+  })
+}
+
 const fetchBaiduNews = () => {
   return new Promise((resolve, reject) => {
     const options = {
-      hostname: 'www.baidu.com',
+      hostname: 'news.baidu.com',
       port: 443,
-      path: `/s?wd=%E8%8B%B1%E6%AD%8C%E8%88%9E+%E9%9D%9E%E9%81%97&rn=20&ie=utf-8`,
+      path: '/rss',
+      method: 'GET'
+    }
+
+    const req = https.request(options, (res) => {
+      let data = ''
+      res.on('data', (chunk) => { data += chunk })
+      res.on('end', () => {
+        try {
+          const news = []
+          const items = data.match(/<item[^>]*>[\s\S]*?<\/item>/gi) || []
+          for (const item of items.slice(0, 20)) {
+            const titleMatch = item.match(/<title>([^<]*)<\/title>/i)
+            const linkMatch = item.match(/<link>([^<]*)<\/link>/i)
+            const descMatch = item.match(/<description>([^<]*)<\/description>/i)
+            if (titleMatch && linkMatch) {
+              news.push({
+                title: titleMatch[1],
+                link: linkMatch[1],
+                pubDate: new Date().toISOString(),
+                content: descMatch ? descMatch[1] : '',
+                summary: titleMatch[1],
+                category: '其他'
+              })
+            }
+          }
+          console.log(`Baidu news found: ${news.length}`)
+          resolve(news)
+        } catch (e) {
+          resolve([])
+        }
+      })
+    })
+    req.on('error', reject)
+    req.setTimeout(10000, () => { req.destroy(); resolve([]) })
+    req.end()
+  })
+}
+
+const fetchBilibiliHot = () => {
+  return new Promise((resolve, reject) => {
+    const options = {
+      hostname: 'api.bilibili.com',
+      port: 443,
+      path: '/x/web-interface/ranking/v2?rid=0&type=all',
       method: 'GET',
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'application/json'
       }
     }
 
@@ -480,27 +556,21 @@ const fetchBaiduNews = () => {
 
       res.on('end', () => {
         try {
-          const newsMatch = data.match(/<h3[^>]*class="[^"]*news[^"]*"[^>]*>.*?<\/h3>/gi) || []
-          const linkMatch = data.match(/href="(https?:\/\/[^"]*?)"/gi) || []
-
-          const news = []
-          for (let i = 0; i < Math.min(newsMatch.length, 10); i++) {
-            const titleMatch = newsMatch[i].match(/<em[^>]*>(.*?)<\/em>/i)
-            const title = titleMatch ? titleMatch[1] : newsMatch[i].replace(/<[^>]*>/g, '')
-            const link = linkMatch[i * 2] ? linkMatch[i * 2].replace('href="', '').replace('"', '') : ''
-
-            if (title && title.includes('英歌舞')) {
-              news.push({
-                title: title.replace(/<[^>]*>/g, ''),
-                link: link,
-                pubDate: new Date().toISOString(),
-                content: '',
-                summary: title.replace(/<[^>]*>/g, ''),
-                category: categorizeNews(title, '')
-              })
-            }
+          const parsed = JSON.parse(data)
+          if (parsed.data && parsed.data.list) {
+            const news = parsed.data.list.slice(0, 20).map(item => ({
+              title: item.title,
+              link: `https://www.bilibili.com/video/${item.bvid}`,
+              pubDate: new Date().toISOString(),
+              content: '',
+              summary: item.title,
+              category: categorizeNews(item.title, '')
+            })).filter(item => item.title.includes('英歌舞'))
+            console.log(`Bilibili news found: ${news.length}`)
+            resolve(news)
+          } else {
+            resolve([])
           }
-          resolve(news)
         } catch (e) {
           console.error('Parse error:', e.message)
           resolve([])
@@ -560,140 +630,6 @@ const fetchWeiboHot = () => {
             resolve(news)
           } else {
             console.log('Weibo hotList is not an array:', typeof hotList)
-            resolve([])
-          }
-        } catch (e) {
-          console.error('Parse error:', e.message)
-          resolve([])
-        }
-      })
-    })
-
-    req.on('error', (e) => {
-      console.error('Request error:', e.message)
-      resolve([])
-    })
-
-    req.setTimeout(10000, () => {
-      req.destroy()
-      resolve([])
-    })
-
-    req.end()
-  })
-}
-
-const fetchSogouNews = () => {
-  return new Promise((resolve, reject) => {
-    const options = {
-      hostname: 'www.sogou.com',
-      port: 443,
-      path: `/s?q=%E8%8B%B1%E6%AD%8C%E8%88%9E&ie=utf8&type=web&c=news`,
-      method: 'GET',
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0'
-      }
-    }
-
-    const req = https.request(options, (res) => {
-      let data = ''
-
-      res.on('data', (chunk) => {
-        data += chunk
-      })
-
-      res.on('end', () => {
-        try {
-          const news = []
-          const items = data.match(/<div class="vrwrap"[^>]*>[\s\S]*?<\/div>\s*<\/div>/gi) || []
-          const titles = data.match(/<h3 class="[^"]*"[^>]*>[\s\S]*?<\/h3>/gi) || []
-          const links = data.match(/href="(https?:\/\/[^"]*?)"/gi) || []
-
-          for (let i = 0; i < Math.min(titles.length, 15); i++) {
-            const titleMatch = titles[i].match(/<em[^>]*>(.*?)<\/em>/gi)
-            if (titleMatch) {
-              let title = titleMatch.map(m => m.replace(/<[^>]*>/g, '')).join('')
-              const linkMatch = links[i * 2]
-              const link = linkMatch ? linkMatch.replace('href="', '').replace('"', '') : ''
-
-              if (title.includes('英歌舞') || title.includes('英歌')) {
-                news.push({
-                  title: title,
-                  link: link.startsWith('http') ? link : `https://www.sogou.com${link}`,
-                  pubDate: new Date().toISOString(),
-                  content: '',
-                  summary: title,
-                  category: categorizeNews(title, '')
-                })
-              }
-            }
-          }
-          console.log(`Sogou news found: ${news.length}`)
-          resolve(news)
-        } catch (e) {
-          console.error('Parse error:', e.message)
-          resolve([])
-        }
-      })
-    })
-
-    req.on('error', (e) => {
-      console.error('Request error:', e.message)
-      resolve([])
-    })
-
-    req.setTimeout(10000, () => {
-      req.destroy()
-      resolve([])
-    })
-
-    req.end()
-  })
-}
-
-const fetchBilibiliHot = () => {
-  return new Promise((resolve, reject) => {
-    const options = {
-      hostname: 'api.bilibili.com',
-      port: 443,
-      path: '/x/web-interface/ranking/v2?rid=0&type=all',
-      method: 'GET',
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'application/json, text/plain, */*',
-        'Referer': 'https://www.bilibili.com'
-      }
-    }
-
-    const req = https.request(options, (res) => {
-      let data = ''
-
-      res.on('data', (chunk) => {
-        data += chunk
-      })
-
-      res.on('end', () => {
-        try {
-          const parsed = JSON.parse(data)
-          if (parsed.data && parsed.data.list) {
-            const news = parsed.data.list
-              .filter(item => {
-                const title = item.title || ''
-                const desc = item.desc || ''
-                return title.includes('英歌舞') || title.includes('英歌') ||
-                       desc.includes('英歌舞') || desc.includes('英歌')
-              })
-              .map(item => ({
-                title: item.title,
-                link: `https://www.bilibili.com/video/${item.bvid}`,
-                pubDate: new Date(item.pubdate * 1000).toISOString(),
-                content: item.desc || '',
-                summary: item.title,
-                category: categorizeNews(item.title, item.desc || '')
-              }))
-            console.log(`Bilibili hot found: ${news.length}`)
-            resolve(news)
-          } else {
             resolve([])
           }
         } catch (e) {
@@ -997,43 +933,27 @@ app.post('/api/news/refresh', async (req, res) => {
     await updateNews()
     const yinggeGrouped = categorizeAndGroup(yinggeNews)
     const latestGrouped = categorizeAndGroup(latestNews)
+
     res.json({
       success: true,
       yinggeNews: yinggeGrouped,
       latestNews: latestGrouped,
-      lastUpdate
+      lastUpdate,
+      yinggeTotal: yinggeNews.length,
+      latestTotal: latestNews.length
     })
   } catch (error) {
+    console.error('Refresh error:', error)
     res.status(500).json({
       success: false,
-      error: '刷新新闻失败'
+      error: '刷新失败'
     })
   }
 })
 
-app.get('/api/news/status', (req, res) => {
-  res.json({
-    yinggeCount: yinggeNews.length,
-    latestCount: latestNews.length,
-    lastUpdate
-  })
+loadNewsFromFile()
+
+const PORT = process.env.PORT || 3001
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`)
 })
-
-const PORT = API_CONFIG.SERVER.PORT
-
-const startServer = async () => {
-  loadNewsFromFile()
-  
-  app.listen(PORT, () => {
-    console.log(`News Agent server running on port ${PORT}`)
-    console.log(`Loaded ${yinggeNews.length} yingge news, ${latestNews.length} latest news from storage`)
-    
-    if (yinggeNews.length === 0 && latestNews.length === 0) {
-      updateNews()
-    }
-    
-    setInterval(updateNews, API_CONFIG.NEWS.UPDATE_INTERVAL)
-  })
-}
-
-startServer()

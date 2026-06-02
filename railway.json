@@ -1,0 +1,13 @@
+{
+  "$schema": "https://railway.app/railway.schema.json",
+  "build": {
+    "command": "cd server && npm install"
+  },
+  "start": {
+    "command": "cd server && node index.js",
+    "cwd": "/app"
+  },
+  "env": {
+    "PORT": "3001"
+  }
+}

@@ -20,10 +20,10 @@ let yinggeNews = []
 let latestNews = []
 let lastUpdate = null
 
-const aiClient = new OpenAI({
+const aiClient = API_CONFIG.DEEPSEEK.API_KEY ? new OpenAI({
   apiKey: API_CONFIG.DEEPSEEK.API_KEY,
   baseURL: API_CONFIG.DEEPSEEK.BASE_URL
-})
+}) : null
 
 const loadNewsFromFile = () => {
   try {

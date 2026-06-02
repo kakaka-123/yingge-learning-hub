@@ -1,8 +1,8 @@
 {
   "name": "yingge-api",
   "version": 2,
-  "buildCommand": "cd server && npm install && npm run build",
-  "outputDirectory": "server/dist",
+  "buildCommand": "npm install",
+  "startCommand": "node index.js",
   "routes": [
     {
       "src": "/api/(.*)",
